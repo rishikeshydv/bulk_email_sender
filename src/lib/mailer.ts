@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import type Mail from "nodemailer/lib/mailer";
 
 export function escapeHtml(value: string) {
   return value
@@ -46,6 +47,7 @@ export async function sendGmailMessage(params: {
   subject: string;
   text: string;
   html?: string;
+  attachments?: Mail.Attachment[];
 }) {
   const user = requiredEnv("GMAIL_USER");
   const fromName = process.env.GMAIL_FROM_NAME?.trim();
@@ -59,5 +61,6 @@ export async function sendGmailMessage(params: {
     subject: params.subject,
     text: params.text,
     html: params.html ?? toSimpleHtml(params.text),
+    attachments: params.attachments,
   });
 }

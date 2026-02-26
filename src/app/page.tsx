@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 type Recipient = {
   id: string;
@@ -45,6 +45,23 @@ type DomainGroup = {
   domain: string;
   recipients: Recipient[];
 };
+
+const MAX_ATTACHMENT_COUNT = 10;
+const MAX_ATTACHMENT_TOTAL_MB = 20;
+
+function isRichHtmlEmpty(html: string) {
+  const normalized = html
+    .replace(/<br\s*\/?>/gi, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+
+  return normalized.length === 0;
+}
+
+function bytesToMbLabel(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
 
 function parseRecipientInput(raw: string) {
   const parsedRecipients = new Map<string, { email: string; firstName: string }>();
@@ -110,6 +127,7 @@ export default function Home() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [search, setSearch] = useState("");
   const [activeDomainFilter, setActiveDomainFilter] = useState<string | null>(null);
   const [bulkAddInput, setBulkAddInput] = useState("");
@@ -120,6 +138,12 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
+  const bodyEditorRef = useRef<HTMLDivElement | null>(null);
+
+  const totalAttachmentBytes = useMemo(
+    () => attachments.reduce((sum, file) => sum + file.size, 0),
+    [attachments],
+  );
 
   const domainGroups: DomainGroup[] = (() => {
     const groups = new Map<string, Recipient[]>();
@@ -186,6 +210,68 @@ export default function Home() {
     filteredRecipients.length > 0 &&
     filteredRecipients.every((recipient) => selectedIds.includes(recipient.id));
 
+  const isBodyEmpty = isRichHtmlEmpty(body);
+
+  const sendButtonLabel =
+    sendButtonStatus === "sending"
+      ? "Sending"
+      : sendButtonStatus === "sent"
+        ? "Sent"
+        : sendButtonStatus === "failed"
+          ? "Failed"
+          : "Send Individually";
+
+  function getEditorPlainText() {
+    return bodyEditorRef.current?.innerText.trim() || "";
+  }
+
+  function focusEditor() {
+    bodyEditorRef.current?.focus();
+  }
+
+  function execEditorCommand(command: string, value?: string) {
+    focusEditor();
+    document.execCommand(command, false, value);
+    setBody(bodyEditorRef.current?.innerHTML || "");
+    setSendButtonStatus("idle");
+  }
+
+  function handleInsertLink() {
+    const url = window.prompt("Enter URL (https://...)");
+    if (!url) {
+      return;
+    }
+
+    const normalizedUrl = url.trim();
+    if (!/^https?:\/\//i.test(normalizedUrl) && !/^mailto:/i.test(normalizedUrl)) {
+      setErrorMessage("Link must start with http(s):// or mailto:");
+      return;
+    }
+
+    setErrorMessage(null);
+    execEditorCommand("createLink", normalizedUrl);
+  }
+
+  function handleAttachmentInput(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setSendButtonStatus("idle");
+
+    setAttachments((current) => {
+      const deduped = new Map<string, File>();
+
+      for (const file of [...current, ...Array.from(files)]) {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        deduped.set(key, file);
+      }
+
+      return Array.from(deduped.values());
+    });
+  }
+
   async function refreshAll() {
     setErrorMessage(null);
     const data = await fetchDashboardData();
@@ -212,6 +298,10 @@ export default function Home() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    setSendButtonStatus("idle");
+  }, [subject, body, attachments, selectedIds]);
 
   async function handleAddRecipients(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -295,8 +385,10 @@ export default function Home() {
     setErrorMessage(null);
     setLastSend(null);
 
-    if (!subject.trim() || !body.trim()) {
-      setErrorMessage("Subject and body are required.");
+    const bodyText = getEditorPlainText();
+
+    if (!subject.trim() || !bodyText) {
+      setErrorMessage("Subject and main body are required.");
       return;
     }
 
@@ -305,19 +397,34 @@ export default function Home() {
       return;
     }
 
+    if (attachments.length > MAX_ATTACHMENT_COUNT) {
+      setErrorMessage(`You can attach up to ${MAX_ATTACHMENT_COUNT} files.`);
+      return;
+    }
+
+    if (totalAttachmentBytes > MAX_ATTACHMENT_TOTAL_MB * 1024 * 1024) {
+      setErrorMessage(`Total attachment size must be under ${MAX_ATTACHMENT_TOTAL_MB}MB.`);
+      return;
+    }
+
     startSubmitTransition(() => {
       void (async () => {
         setSendButtonStatus("sending");
 
         try {
+          const formData = new FormData();
+          formData.append("subject", subject);
+          formData.append("bodyText", bodyText);
+          formData.append("bodyHtml", body);
+          formData.append("recipientIds", JSON.stringify(selectedIds));
+
+          for (const file of attachments) {
+            formData.append("attachments", file);
+          }
+
           const response = await fetch("/api/send", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              subject,
-              body,
-              recipientIds: selectedIds,
-            }),
+            body: formData,
           });
 
           const data = (await response.json()) as SendResult & { error?: string };
@@ -362,15 +469,6 @@ export default function Home() {
       return current.filter((id) => !domainIds.has(id));
     });
   }
-
-  const sendButtonLabel =
-    sendButtonStatus === "sending"
-      ? "Sending"
-      : sendButtonStatus === "sent"
-        ? "Sent"
-        : sendButtonStatus === "failed"
-          ? "Failed"
-          : "Send Individually";
 
   return (
     <main className="min-h-screen px-4 py-8 sm:px-6 lg:px-10">
@@ -686,15 +784,138 @@ export default function Home() {
 
                 <div>
                   <label className="mb-1 block font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                    Body
+                    Main Body
                   </label>
-                  <textarea
-                    value={body}
-                    onChange={(event) => setBody(event.target.value)}
-                    rows={10}
-                    placeholder={"I wanted to reach out about...\n\nHere is the main message content."}
-                    className="w-full resize-y rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--brand-2)]"
-                  />
+                  <div className="rounded-xl border border-[var(--line)] bg-white">
+                    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--line)] p-2">
+                      <button
+                        type="button"
+                        onClick={() => execEditorCommand("bold")}
+                        className="rounded-lg border border-[var(--line)] bg-white px-3 py-1.5 text-sm font-semibold hover:bg-neutral-50"
+                        aria-label="Bold"
+                        title="Bold"
+                      >
+                        B
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execEditorCommand("italic")}
+                        className="rounded-lg border border-[var(--line)] bg-white px-3 py-1.5 text-sm italic hover:bg-neutral-50"
+                        aria-label="Italic"
+                        title="Italic"
+                      >
+                        I
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleInsertLink}
+                        className="rounded-lg border border-[var(--line)] bg-white px-3 py-1.5 text-sm hover:bg-neutral-50"
+                        aria-label="Insert link"
+                        title="Insert link"
+                      >
+                        Link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => execEditorCommand("removeFormat")}
+                        className="rounded-lg border border-[var(--line)] bg-white px-3 py-1.5 text-sm hover:bg-neutral-50"
+                        aria-label="Clear formatting"
+                        title="Clear formatting"
+                      >
+                        Clear
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      {isBodyEmpty && (
+                        <p className="pointer-events-none absolute left-3 top-2 right-3 whitespace-pre-wrap text-sm text-neutral-400">
+                          {"I wanted to reach out about...\n\nHere is the main message content."}
+                        </p>
+                      )}
+                      <div
+                        ref={bodyEditorRef}
+                        contentEditable
+                        suppressContentEditableWarning
+                        onInput={(event) => {
+                          setBody(event.currentTarget.innerHTML);
+                          setSendButtonStatus("idle");
+                        }}
+                        onFocus={() => setErrorMessage(null)}
+                        className="min-h-44 w-full rounded-b-xl px-3 py-2 text-sm outline-none focus:ring-0"
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-[var(--muted)]">
+                    The email automatically adds the personalized greeting and signature. Use the
+                    toolbar for bold/italic/link formatting.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-1 block font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                    Attach Files
+                  </label>
+                  <div className="rounded-xl border border-[var(--line)] bg-white p-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex cursor-pointer items-center rounded-full bg-[var(--brand)] px-4 py-2 font-mono text-xs uppercase tracking-[0.14em] text-white hover:brightness-110">
+                        Add Files
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={(event) => {
+                            handleAttachmentInput(event.target.files);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                      <p className="text-xs text-[var(--muted)]">
+                        Up to {MAX_ATTACHMENT_COUNT} files, total under {MAX_ATTACHMENT_TOTAL_MB}MB
+                        ({bytesToMbLabel(totalAttachmentBytes)} selected)
+                      </p>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {attachments.length === 0 && (
+                        <p className="text-sm text-[var(--muted)]">
+                          No attachments selected.
+                        </p>
+                      )}
+
+                      {attachments.map((file) => (
+                        <div
+                          key={`${file.name}:${file.size}:${file.lastModified}`}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-[var(--ink)]">
+                              {file.name}
+                            </p>
+                            <p className="text-xs text-[var(--muted)]">{bytesToMbLabel(file.size)}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachments((current) =>
+                                current.filter(
+                                  (candidate) =>
+                                    !(
+                                      candidate.name === file.name &&
+                                      candidate.size === file.size &&
+                                      candidate.lastModified === file.lastModified
+                                    ),
+                                ),
+                              );
+                              setSendButtonStatus("idle");
+                            }}
+                            className="rounded-full border border-red-200 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--danger)] hover:bg-red-50"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
