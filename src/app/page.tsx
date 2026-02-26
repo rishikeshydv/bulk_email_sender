@@ -39,15 +39,32 @@ type SendResult = {
   }>;
 };
 
-function parseEmailInput(raw: string) {
-  return Array.from(
-    new Set(
-      raw
-        .split(/[\n,\s;]+/)
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean),
-    ),
-  );
+function parseRecipientInput(raw: string) {
+  const parsedRecipients = new Map<string, { email: string; firstName: string }>();
+  const invalidLines: number[] = [];
+
+  raw.split("\n").forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const [firstNameRaw, emailRaw] = trimmed.split(",").map((value) => value.trim());
+    const firstName = firstNameRaw?.trim();
+    const email = emailRaw?.trim().toLowerCase();
+
+    if (!firstName || !email) {
+      invalidLines.push(index + 1);
+      return;
+    }
+
+    parsedRecipients.set(email, { email, firstName });
+  });
+
+  return {
+    recipients: Array.from(parsedRecipients.values()),
+    invalidLines,
+  };
 }
 
 async function loadRecipients(): Promise<Recipient[]> {
@@ -141,9 +158,16 @@ export default function Home() {
     setStatusMessage(null);
     setErrorMessage(null);
 
-    const emails = parseEmailInput(bulkAddInput);
-    if (emails.length === 0) {
-      setErrorMessage("Add at least one valid email address.");
+    const parsedInput = parseRecipientInput(bulkAddInput);
+    if (parsedInput.recipients.length === 0) {
+      setErrorMessage("Add at least one recipient in the format FirstName,email@example.com.");
+      return;
+    }
+
+    if (parsedInput.invalidLines.length > 0) {
+      setErrorMessage(
+        `Invalid recipient format on line${parsedInput.invalidLines.length > 1 ? "s" : ""} ${parsedInput.invalidLines.join(", ")}. Use FirstName,email@example.com`,
+      );
       return;
     }
 
@@ -153,7 +177,12 @@ export default function Home() {
           const response = await fetch("/api/recipients", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ recipients: emails.map((email) => ({ email })) }),
+            body: JSON.stringify({
+              recipients: parsedInput.recipients.map((recipient) => ({
+                email: recipient.email,
+                firstName: recipient.firstName,
+              })),
+            }),
           });
 
           const data = (await response.json()) as { message?: string; error?: string };
@@ -162,7 +191,9 @@ export default function Home() {
           }
 
           setBulkAddInput("");
-          setStatusMessage(data.message ?? `Saved ${emails.length} recipients.`);
+          setStatusMessage(
+            data.message ?? `Saved ${parsedInput.recipients.length} recipients.`,
+          );
           await refreshAll();
         } catch (error) {
           setErrorMessage(error instanceof Error ? error.message : "Failed to add recipients.");
@@ -325,19 +356,20 @@ export default function Home() {
               </div>
 
               <form onSubmit={handleAddRecipients} className="rounded-2xl border border-[var(--line)] bg-white/85 p-4">
-                <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                  Add Recipients (comma/newline separated)
+                  <label className="mb-2 block font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Add Recipients (one per line: FirstName,email)
                 </label>
                 <textarea
                   value={bulkAddInput}
                   onChange={(event) => setBulkAddInput(event.target.value)}
                   rows={4}
-                  placeholder={"alice@example.com\nbob@example.com"}
+                  placeholder={"Alice,alice@example.com\nBob,bob@example.com"}
                   className="w-full resize-y rounded-xl border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[var(--brand-2)]"
                 />
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <p className="text-xs text-[var(--muted)]">
-                    Duplicate emails are skipped.
+                    <code className="rounded bg-white px-1 py-0.5">{"{{name}}"}</code> uses the
+                    saved first name. Duplicate emails are skipped.
                   </p>
                   <button
                     type="submit"
@@ -414,7 +446,7 @@ export default function Home() {
                           {recipient.email}
                         </p>
                         <p className="truncate font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
-                          {recipient.name || "No name"} • Added {" "}
+                          {recipient.name || "No first name"} • Added {" "}
                           {new Date(recipient.createdAt).toLocaleDateString()}
                         </p>
                       </div>
@@ -441,8 +473,9 @@ export default function Home() {
               <div className="mb-4">
                 <h2 className="text-xl font-semibold">Compose Campaign</h2>
                 <p className="text-sm text-[var(--muted)]">
-                  Backend sends one Gmail message per recipient (sequentially). Use {" "}
-                  <code className="rounded bg-white px-1 py-0.5">{"{{name}}"}</code> or {" "}
+                  Backend sends one Gmail message per recipient (sequentially). Use{" "}
+                  <code className="rounded bg-white px-1 py-0.5">{"{{name}}"}</code>,{" "}
+                  <code className="rounded bg-white px-1 py-0.5">{"{{firstName}}"}</code>, or{" "}
                   <code className="rounded bg-white px-1 py-0.5">{"{{email}}"}</code> for personalization.
                 </p>
               </div>

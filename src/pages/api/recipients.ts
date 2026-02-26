@@ -8,13 +8,12 @@ const recipientSchema = z.object({
     .trim()
     .email()
     .transform((value) => value.toLowerCase()),
-  name: z
-    .string()
-    .trim()
-    .max(120)
-    .optional()
-    .transform((value) => value || undefined),
-});
+  firstName: z.string().trim().max(120).optional(),
+  name: z.string().trim().max(120).optional(),
+}).transform((value) => ({
+  email: value.email,
+  name: (value.firstName ?? value.name)?.trim() || undefined,
+}));
 
 const createRecipientsSchema = z.object({
   recipients: z.array(recipientSchema).min(1),
