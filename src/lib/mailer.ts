@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 
-function escapeHtml(value: string) {
+export function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -9,7 +9,7 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
-function toSimpleHtml(text: string) {
+export function toSimpleHtml(text: string) {
   return `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">${escapeHtml(
     text,
   ).replaceAll("\n", "<br/>")}</div>`;
@@ -38,6 +38,7 @@ export async function sendGmailMessage(params: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }) {
   const user = requiredEnv("GMAIL_USER");
   const fromName = process.env.GMAIL_FROM_NAME?.trim();
@@ -50,6 +51,6 @@ export async function sendGmailMessage(params: {
     replyTo: replyTo || undefined,
     subject: params.subject,
     text: params.text,
-    html: toSimpleHtml(params.text),
+    html: params.html ?? toSimpleHtml(params.text),
   });
 }

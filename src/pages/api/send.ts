@@ -1,7 +1,7 @@
 import { DeliveryStatus } from "@prisma/client";
 import { NextApiRequest, NextApiResponse } from "next";
 import { z } from "zod";
-import { sendGmailMessage } from "@/lib/mailer";
+import { escapeHtml, sendGmailMessage } from "@/lib/mailer";
 import { prisma } from "@/lib/prisma";
 import { renderRecipientTemplate } from "@/lib/template";
 
@@ -17,6 +17,14 @@ const EMAIL_SIGNATURE = [
   "Founder, Comply AI",
   "rishi@complyai.dev | LinkedIn | +1 (862)-703 8504",
 ].join("\n");
+
+const LINKEDIN_URL = "https://www.linkedin.com/in/rishikesh-y-75846420b/";
+
+function buildEmailHtml(bodyTextWithoutSignature: string) {
+  const escapedBody = escapeHtml(bodyTextWithoutSignature).replaceAll("\n", "<br/>");
+
+  return `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">${escapedBody}<br/><br/>Best,<br/>Rishikesh Yadav<br/>Founder, Comply AI<br/>rishi@complyai.dev | <a href="${LINKEDIN_URL}" target="_blank" rel="noopener noreferrer">LinkedIn</a> | +1 (862)-703 8504</div>`;
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -72,6 +80,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           to: recipient.email,
           subject,
           text: body,
+          html: buildEmailHtml(bodyWithoutSignature),
         });
 
         const sentAt = new Date();
