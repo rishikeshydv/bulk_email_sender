@@ -39,6 +39,8 @@ type SendResult = {
   }>;
 };
 
+type SendButtonStatus = "idle" | "sending" | "sent" | "failed";
+
 type DomainGroup = {
   domain: string;
   recipients: Recipient[];
@@ -114,6 +116,7 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastSend, setLastSend] = useState<SendResult | null>(null);
+  const [sendButtonStatus, setSendButtonStatus] = useState<SendButtonStatus>("idle");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
@@ -304,6 +307,8 @@ export default function Home() {
 
     startSubmitTransition(() => {
       void (async () => {
+        setSendButtonStatus("sending");
+
         try {
           const response = await fetch("/api/send", {
             method: "POST",
@@ -324,6 +329,7 @@ export default function Home() {
           setStatusMessage(
             `Campaign sent. ${data.sentCount} succeeded, ${data.failedCount} failed.`,
           );
+          setSendButtonStatus(data.failedCount === 0 && data.sentCount > 0 ? "sent" : "failed");
 
           startRefreshTransition(() => {
             void refreshAll().catch((error) => {
@@ -335,6 +341,7 @@ export default function Home() {
             });
           });
         } catch (error) {
+          setSendButtonStatus("failed");
           setErrorMessage(error instanceof Error ? error.message : "Failed to send emails.");
         }
       })();
@@ -355,6 +362,15 @@ export default function Home() {
       return current.filter((id) => !domainIds.has(id));
     });
   }
+
+  const sendButtonLabel =
+    sendButtonStatus === "sending"
+      ? "Sending"
+      : sendButtonStatus === "sent"
+        ? "Sent"
+        : sendButtonStatus === "failed"
+          ? "Failed"
+          : "Send Individually";
 
   return (
     <main className="min-h-screen px-4 py-8 sm:px-6 lg:px-10">
@@ -689,9 +705,15 @@ export default function Home() {
                   <button
                     type="submit"
                     disabled={isSubmitting || selectedCount === 0}
-                    className="rounded-full bg-[var(--brand-2)] px-5 py-2.5 font-mono text-xs uppercase tracking-[0.16em] text-white transition hover:brightness-110 disabled:opacity-60"
+                    className={`rounded-full px-5 py-2.5 font-mono text-xs uppercase tracking-[0.16em] text-white transition disabled:opacity-60 ${
+                      sendButtonStatus === "failed"
+                        ? "bg-red-600 hover:brightness-110"
+                        : sendButtonStatus === "sent"
+                          ? "bg-emerald-600 hover:brightness-110"
+                          : "bg-[var(--brand-2)] hover:brightness-110"
+                    }`}
                   >
-                    {isSubmitting ? "Sending..." : "Send Individually"}
+                    {sendButtonLabel}
                   </button>
                 </div>
               </form>
