@@ -1,3 +1,5 @@
+import dns from "node:dns";
+import net from "node:net";
 import nodemailer from "nodemailer";
 import type Mail from "nodemailer/lib/mailer";
 
@@ -28,16 +30,71 @@ function requiredEnv(name: string) {
 export function getGmailTransporter() {
   const user = requiredEnv("GMAIL_USER");
   const pass = requiredEnv("GMAIL_APP_PASSWORD");
+  const smtpHost = "smtp.gmail.com";
 
   return nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    host: smtpHost,
     port: 587,
     secure: false, // STARTTLS on 587
     requireTLS: true,
+    tls: {
+      servername: smtpHost,
+    },
     auth: { user, pass },
     connectionTimeout: 20000,
     greetingTimeout: 20000,
     socketTimeout: 30000,
+    // Railway can resolve Gmail to IPv6 first, but its runtime may not have IPv6 egress.
+    // Force an IPv4 socket and let Nodemailer continue STARTTLS/auth over it.
+    getSocket(
+      options: { port?: number; connectionTimeout?: number },
+      callback: (error: Error | null, socketOptions?: { connection: net.Socket }) => void,
+    ) {
+      dns.resolve4(smtpHost, (resolveError, addresses) => {
+        if (resolveError || !addresses?.length) {
+          callback(resolveError || new Error("Could not resolve IPv4 for smtp.gmail.com"));
+          return;
+        }
+
+        const targetIp = addresses[Math.floor(Math.random() * addresses.length)] || addresses[0];
+        const timeoutMs =
+          typeof options.connectionTimeout === "number" ? options.connectionTimeout : 20000;
+        const socket = net.createConnection({
+          host: targetIp,
+          port: options.port || 587,
+        });
+
+        let settled = false;
+        const finish = (error: Error | null, socketOptions?: { connection: net.Socket }) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          callback(error, socketOptions);
+        };
+
+        socket.setTimeout(timeoutMs);
+
+        socket.once("connect", () => {
+          socket.setTimeout(0);
+          finish(null, { connection: socket });
+        });
+
+        socket.once("timeout", () => {
+          const timeoutError = new Error(
+            `SMTP IPv4 connection timeout to ${smtpHost} (${targetIp}:${options.port || 587})`,
+          ) as Error & { code?: string };
+          timeoutError.code = "ETIMEDOUT";
+          socket.destroy(timeoutError);
+          finish(timeoutError);
+        });
+
+        socket.once("error", (error) => {
+          finish(error);
+        });
+      });
+    },
   });
 }
 
