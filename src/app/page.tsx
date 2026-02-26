@@ -726,7 +726,7 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="space-y-3">
+              <div className="max-h-[420px] space-y-3 overflow-auto pr-1">
                 {campaigns.length === 0 && (
                   <p className="rounded-xl border border-dashed border-[var(--line)] p-4 text-sm text-[var(--muted)]">
                     No campaigns yet.
