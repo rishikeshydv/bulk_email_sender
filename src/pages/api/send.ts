@@ -20,8 +20,19 @@ const EMAIL_SIGNATURE = [
 
 const LINKEDIN_URL = "https://www.linkedin.com/in/rishikesh-y-75846420b/";
 
-function buildEmailHtml(bodyTextWithoutSignature: string) {
-  const escapedBody = escapeHtml(bodyTextWithoutSignature).replaceAll("\n", "<br/>");
+const EMAIL_INTRO_TEMPLATE = ["Hi {{name}},", "", "I hope this email finds you well."].join(
+  "\n",
+);
+
+function buildEmailText(mainBody: string, recipient: { email: string; name: string | null }) {
+  const intro = renderRecipientTemplate(EMAIL_INTRO_TEMPLATE, recipient);
+  return `${intro}\n\n${mainBody}\n\n${EMAIL_SIGNATURE}`;
+}
+
+function buildEmailHtml(mainBody: string, recipient: { email: string; name: string | null }) {
+  const intro = renderRecipientTemplate(EMAIL_INTRO_TEMPLATE, recipient);
+  const fullTextWithoutSignature = `${intro}\n\n${mainBody}`;
+  const escapedBody = escapeHtml(fullTextWithoutSignature).replaceAll("\n", "<br/>");
 
   return `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">${escapedBody}<br/><br/>Best,<br/>Rishikesh Yadav<br/>Founder, Comply AI<br/>rishi@complyai.dev | <a href="${LINKEDIN_URL}" target="_blank" rel="noopener noreferrer">LinkedIn</a> | +1 (862)-703 8504</div>`;
 }
@@ -72,15 +83,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     for (const recipient of recipients) {
       const subject = renderRecipientTemplate(parsed.data.subject, recipient);
-      const bodyWithoutSignature = renderRecipientTemplate(parsed.data.body, recipient).trimEnd();
-      const body = `${bodyWithoutSignature}\n\n${EMAIL_SIGNATURE}`;
+      const mainBody = renderRecipientTemplate(parsed.data.body, recipient).trim();
+      const body = buildEmailText(mainBody, recipient);
 
       try {
         const info = await sendGmailMessage({
           to: recipient.email,
           subject,
           text: body,
-          html: buildEmailHtml(bodyWithoutSignature),
+          html: buildEmailHtml(mainBody, recipient),
         });
 
         const sentAt = new Date();
