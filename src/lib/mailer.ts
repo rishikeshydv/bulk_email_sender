@@ -29,10 +29,17 @@ export function getGmailTransporter() {
   const pass = requiredEnv("GMAIL_APP_PASSWORD");
 
   return nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false, // STARTTLS on 587
+    requireTLS: true,
     auth: { user, pass },
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000,
   });
 }
+
 
 export async function sendGmailMessage(params: {
   to: string;
