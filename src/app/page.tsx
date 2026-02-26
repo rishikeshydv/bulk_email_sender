@@ -39,6 +39,11 @@ type SendResult = {
   }>;
 };
 
+type DomainGroup = {
+  domain: string;
+  recipients: Recipient[];
+};
+
 function parseRecipientInput(raw: string) {
   const parsedRecipients = new Map<string, { email: string; firstName: string }>();
   const invalidLines: number[] = [];
@@ -92,6 +97,11 @@ async function fetchDashboardData() {
   return { recipients, campaigns };
 }
 
+function getCompanyDomain(email: string) {
+  const [, domain] = email.toLowerCase().split("@");
+  return domain || "unknown";
+}
+
 export default function Home() {
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -99,6 +109,7 @@ export default function Home() {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [search, setSearch] = useState("");
+  const [activeDomainFilter, setActiveDomainFilter] = useState<string | null>(null);
   const [bulkAddInput, setBulkAddInput] = useState("");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -107,21 +118,67 @@ export default function Home() {
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isRefreshing, startRefreshTransition] = useTransition();
 
-  const filteredRecipients = (() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return recipients;
+  const domainGroups: DomainGroup[] = (() => {
+    const groups = new Map<string, Recipient[]>();
+
+    for (const recipient of recipients) {
+      const domain = getCompanyDomain(recipient.email);
+      const existing = groups.get(domain);
+      if (existing) {
+        existing.push(recipient);
+      } else {
+        groups.set(domain, [recipient]);
+      }
     }
 
+    return Array.from(groups.entries())
+      .map(([domain, groupedRecipients]) => ({
+        domain,
+        recipients: groupedRecipients.sort((a, b) => a.email.localeCompare(b.email)),
+      }))
+      .sort((a, b) => b.recipients.length - a.recipients.length || a.domain.localeCompare(b.domain));
+  })();
+
+  const filteredRecipients = (() => {
+    const query = search.trim().toLowerCase();
     return recipients.filter((recipient) => {
-      return (
+      const matchesSearch =
+        !query ||
         recipient.email.toLowerCase().includes(query) ||
-        recipient.name?.toLowerCase().includes(query)
-      );
+        recipient.name?.toLowerCase().includes(query) ||
+        getCompanyDomain(recipient.email).includes(query);
+
+      const matchesDomain =
+        !activeDomainFilter || getCompanyDomain(recipient.email) === activeDomainFilter;
+
+      return matchesSearch && matchesDomain;
     });
   })();
 
+  const visibleDomainGroups = domainGroups.filter((group) => {
+    const domainMatchesFilter = !activeDomainFilter || group.domain === activeDomainFilter;
+    const query = search.trim().toLowerCase();
+
+    if (!domainMatchesFilter) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    return (
+      group.domain.includes(query) ||
+      group.recipients.some(
+        (recipient) =>
+          recipient.email.toLowerCase().includes(query) ||
+          recipient.name?.toLowerCase().includes(query),
+      )
+    );
+  });
+
   const selectedCount = selectedIds.length;
+  const selectedIdSet = new Set(selectedIds);
   const allFilteredSelected =
     filteredRecipients.length > 0 &&
     filteredRecipients.every((recipient) => selectedIds.includes(recipient.id));
@@ -284,6 +341,21 @@ export default function Home() {
     });
   }
 
+  function setDomainSelected(domainRecipients: Recipient[], checked: boolean) {
+    setSelectedIds((current) => {
+      if (checked) {
+        const next = new Set(current);
+        for (const recipient of domainRecipients) {
+          next.add(recipient.id);
+        }
+        return Array.from(next);
+      }
+
+      const domainIds = new Set(domainRecipients.map((recipient) => recipient.id));
+      return current.filter((id) => !domainIds.has(id));
+    });
+  }
+
   return (
     <main className="min-h-screen px-4 py-8 sm:px-6 lg:px-10">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
@@ -296,10 +368,6 @@ export default function Home() {
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[var(--ink)] sm:text-4xl">
                 Bulk Email Sender
               </h1>
-              <p className="mt-2 max-w-3xl text-sm text-[var(--muted)] sm:text-base">
-                Select recipients from Postgres, compose a subject/body, and send
-                personalized Gmail emails one-by-one from the backend.
-              </p>
             </div>
             <button
               type="button"
@@ -349,7 +417,7 @@ export default function Home() {
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="email or name"
+                    placeholder="email, first name, or domain"
                     className="w-full rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm outline-none ring-0 placeholder:text-neutral-400 focus:border-[var(--brand-2)]"
                   />
                 </div>
@@ -411,6 +479,123 @@ export default function Home() {
                 </span>
               </div>
 
+              <div className="rounded-2xl border border-[var(--line)] bg-white/75 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--ink)]">Company Domains</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      View recipients grouped by domain and select them in bulk.
+                    </p>
+                  </div>
+                  {activeDomainFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveDomainFilter(null)}
+                      className="rounded-full border border-[var(--line)] bg-white px-3 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--ink)] hover:bg-neutral-50"
+                    >
+                      Clear Domain Filter
+                    </button>
+                  )}
+                </div>
+
+                <div className="max-h-56 space-y-2 overflow-auto pr-1">
+                  {!isLoading && visibleDomainGroups.length === 0 && (
+                    <p className="rounded-xl border border-dashed border-[var(--line)] p-3 text-sm text-[var(--muted)]">
+                      No domain groups match the current filters.
+                    </p>
+                  )}
+
+                  {visibleDomainGroups.map((group) => {
+                    const domainSelectedCount = group.recipients.filter((recipient) =>
+                      selectedIdSet.has(recipient.id),
+                    ).length;
+                    const allDomainSelected =
+                      group.recipients.length > 0 &&
+                      domainSelectedCount === group.recipients.length;
+
+                    return (
+                      <details
+                        key={group.domain}
+                        className={`rounded-xl border p-3 ${
+                          activeDomainFilter === group.domain
+                            ? "border-emerald-300 bg-emerald-50/60"
+                            : "border-[var(--line)] bg-white"
+                        }`}
+                      >
+                        <summary className="cursor-pointer list-none">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={allDomainSelected}
+                              onChange={(event) =>
+                                setDomainSelected(group.recipients, event.target.checked)
+                              }
+                              onClick={(event) => event.stopPropagation()}
+                              className="h-4 w-4 accent-[var(--brand)]"
+                              aria-label={`Select all recipients for ${group.domain}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setActiveDomainFilter((current) =>
+                                  current === group.domain ? null : group.domain,
+                                );
+                              }}
+                              className={`rounded-full px-3 py-1 font-mono text-[11px] uppercase tracking-[0.12em] ${
+                                activeDomainFilter === group.domain
+                                  ? "bg-emerald-600 text-white"
+                                  : "border border-[var(--line)] bg-white text-[var(--ink)]"
+                              }`}
+                            >
+                              {activeDomainFilter === group.domain ? "Showing" : "Filter"}
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold text-[var(--ink)]">
+                                {group.domain}
+                              </p>
+                              <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                                {group.recipients.length} recipient
+                                {group.recipients.length === 1 ? "" : "s"} • {domainSelectedCount} selected
+                              </p>
+                            </div>
+                          </div>
+                        </summary>
+
+                        <div className="mt-3 space-y-1 border-t border-[var(--line)] pt-3">
+                          {group.recipients.map((recipient) => (
+                            <label
+                              key={recipient.id}
+                              className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-neutral-50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedIdSet.has(recipient.id)}
+                                onChange={(event) =>
+                                  setSelectedIds((current) =>
+                                    event.target.checked
+                                      ? Array.from(new Set([...current, recipient.id]))
+                                      : current.filter((id) => id !== recipient.id),
+                                  )
+                                }
+                                className="h-4 w-4 accent-[var(--brand)]"
+                              />
+                              <span className="min-w-0 flex-1 truncate text-sm text-[var(--ink)]">
+                                {recipient.email}
+                              </span>
+                              <span className="truncate text-xs text-[var(--muted)]">
+                                {recipient.name || "No first name"}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </details>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
                 {isLoading && <p className="text-sm text-[var(--muted)]">Loading recipients...</p>}
                 {!isLoading && filteredRecipients.length === 0 && (
@@ -470,19 +655,6 @@ export default function Home() {
 
           <div className="flex flex-col gap-6">
             <section className="rounded-3xl border border-[var(--line)] bg-[var(--bg-panel)] p-5 shadow-[0_12px_45px_rgba(31,28,23,0.06)] backdrop-blur">
-              <div className="mb-4">
-                <h2 className="text-xl font-semibold">Compose Campaign</h2>
-                <p className="text-sm text-[var(--muted)]">
-                  Backend sends one Gmail message per recipient (sequentially). Use{" "}
-                  <code className="rounded bg-white px-1 py-0.5">{"{{name}}"}</code>,{" "}
-                  <code className="rounded bg-white px-1 py-0.5">{"{{firstName}}"}</code>, or{" "}
-                  <code className="rounded bg-white px-1 py-0.5">{"{{email}}"}</code> for personalization.
-                  The greeting <code className="rounded bg-white px-1 py-0.5">Hi {"{{name}}"}</code>{" "}
-                  and your Comply AI signature are appended automatically, so only enter the main
-                  body.
-                </p>
-              </div>
-
               <form onSubmit={handleSendEmails} className="space-y-4">
                 <div>
                   <label className="mb-1 block font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
