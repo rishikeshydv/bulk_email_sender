@@ -477,6 +477,7 @@ export default function Home() {
                   <code className="rounded bg-white px-1 py-0.5">{"{{name}}"}</code>,{" "}
                   <code className="rounded bg-white px-1 py-0.5">{"{{firstName}}"}</code>, or{" "}
                   <code className="rounded bg-white px-1 py-0.5">{"{{email}}"}</code> for personalization.
+                  Your Comply AI signature is appended automatically.
                 </p>
               </div>
 
@@ -501,7 +502,7 @@ export default function Home() {
                     value={body}
                     onChange={(event) => setBody(event.target.value)}
                     rows={10}
-                    placeholder={"Hi {{name}},\n\nI wanted to reach out...\n\nBest,\nRishi"}
+                    placeholder={"Hi {{name}},\n\nI wanted to reach out..."}
                     className="w-full resize-y rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--brand-2)]"
                   />
                 </div>

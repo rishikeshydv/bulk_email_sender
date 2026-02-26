@@ -11,6 +11,13 @@ const sendSchema = z.object({
   recipientIds: z.array(z.string().min(1)).min(1),
 });
 
+const EMAIL_SIGNATURE = [
+  "Best,",
+  "Rishikesh Yadav",
+  "Founder, Comply AI",
+  "rishi@complyai.dev | LinkedIn | +1 (862)-703 8504",
+].join("\n");
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -57,7 +64,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     for (const recipient of recipients) {
       const subject = renderRecipientTemplate(parsed.data.subject, recipient);
-      const body = renderRecipientTemplate(parsed.data.body, recipient);
+      const bodyWithoutSignature = renderRecipientTemplate(parsed.data.body, recipient).trimEnd();
+      const body = `${bodyWithoutSignature}\n\n${EMAIL_SIGNATURE}`;
 
       try {
         const info = await sendGmailMessage({
