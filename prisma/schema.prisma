@@ -1,0 +1,55 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Recipient {
+  id         String     @id @default(cuid())
+  email      String     @unique
+  name       String?
+  active     Boolean    @default(true)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  deliveries Delivery[]
+}
+
+model Campaign {
+  id         String     @id @default(cuid())
+  subject    String
+  body       String
+  createdAt  DateTime   @default(now())
+  deliveries Delivery[]
+}
+
+model Delivery {
+  id                String         @id @default(cuid())
+  campaignId        String
+  recipientId       String
+  status            DeliveryStatus @default(PENDING)
+  error             String?
+  providerMessageId String?
+  sentAt            DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  campaign          Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient         Recipient      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, recipientId])
+  @@index([recipientId, createdAt])
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}

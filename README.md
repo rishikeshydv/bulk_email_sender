@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gmail Bulk Email Sender Agent
 
-## Getting Started
+Next.js app (UI + API routes) for sending Gmail emails individually to selected recipients stored in Postgres.
 
-First, run the development server:
+## Features
+
+- Next.js UI to manage recipients, select specific emails or select all filtered
+- Subject + body composer
+- Sends one email per recipient (sequentially) via Gmail using Nodemailer
+- Postgres storage for recipients, campaigns, and per-recipient delivery logs
+- Next.js API routes (`src/pages/api/*`)
+- Railway-ready config (`railway.json`)
+
+## Environment Variables
+
+Create `.env.local` for local dev (and set the same variables in Railway):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+DATABASE_URL="postgresql://..."
+GMAIL_USER="you@gmail.com"
+GMAIL_APP_PASSWORD="google-app-password"
+GMAIL_FROM_NAME="Your Name"
+GMAIL_REPLY_TO="you@gmail.com"
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Notes:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `GMAIL_APP_PASSWORD` requires Google 2FA + an App Password (recommended for this setup).
+- Gmail send limits still apply.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local Development
 
-## Learn More
+```bash
+npm install
+npm run db:push
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open `http://localhost:3000`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Railway Deployment (High-level)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Create a Railway project and add a Postgres service.
+2. Deploy this app service.
+3. Set env vars (`DATABASE_URL`, Gmail variables) in the app service.
+4. Run `npm run db:push` once (or rely on the `start` script which runs it before `next start`).
 
-## Deploy on Vercel
+## API Routes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `GET/POST/DELETE /api/recipients`
+- `GET /api/campaigns`
+- `POST /api/send`
